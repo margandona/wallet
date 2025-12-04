@@ -108,7 +108,7 @@ El proyecto implementa **Clean Architecture** con 4 capas bien definidas:
 ### 1. Clonar el repositorio
 
 ```powershell
-git clone <repository-url>
+git clone https://github.com/margandona/wallet.git
 cd wallet
 ```
 
