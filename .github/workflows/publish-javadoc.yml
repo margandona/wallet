@@ -31,7 +31,7 @@ jobs:
       - name: Subir Javadoc a GitHub Pages
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./target/site/apidocs
+          path: ./target/reports/apidocs
 
       - name: 🌐 Desplegar en GitHub Pages
         uses: actions/deploy-pages@v4
