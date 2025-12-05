@@ -436,7 +436,6 @@ Este proyecto demuestra la aplicación integral de:
 - Principios SOLID  
 - Clean Architecture  
 - Patrones de Diseño  
-- Test Driven Development (TDD)  
 - Buenas prácticas de desarrollo en Java
 
 ---
