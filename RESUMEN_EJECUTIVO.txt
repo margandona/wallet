@@ -531,6 +531,508 @@ CONCLUSIÓN:
 
 
 ═══════════════════════════════════════════════════════════════════
+ DECISIONES DE DISEÑO Y JUSTIFICACIÓN
+═══════════════════════════════════════════════════════════════════
+
+Esta sección explica POR QUÉ elegimos las clases que tenemos y
+POR QUÉ las implementamos de la manera en que lo hicimos.
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│ DECISIÓN 1: VALUE OBJECTS EN LUGAR DE TIPOS PRIMITIVOS         │
+└─────────────────────────────────────────────────────────────────┘
+
+❓ POR QUÉ Dinero, Email, DocumentoIdentidad en lugar de String/BigDecimal?
+
+PROBLEMA CON PRIMITIVOS:
+  ```java
+  // ❌ Código frágil y propenso a errores
+  void transferir(BigDecimal monto, String email) {
+      if (monto <= 0) throw ...  // Validación dispersa
+      if (!email.contains("@")) throw ...  // Duplicación
+  }
+  ```
+
+SOLUCIÓN CON VALUE OBJECTS:
+  ```java
+  // ✅ Validación centralizada, imposible crear objetos inválidos
+  class Dinero {
+      private final BigDecimal cantidad;
+      
+      public Dinero(BigDecimal cantidad) {
+          if (cantidad.compareTo(BigDecimal.ZERO) < 0)
+              throw new IllegalArgumentException("Monto negativo");
+          this.cantidad = cantidad.setScale(2, RoundingMode.HALF_UP);
+      }
+  }
+  
+  void transferir(Dinero monto, Email email) {
+      // No necesita validar, los objetos ya son válidos
+  }
+  ```
+
+BENEFICIOS OBTENIDOS:
+  ✅ Imposible pasar valores inválidos (validación en constructor)
+  ✅ No hay duplicación de validaciones
+  ✅ Inmutabilidad garantizada (thread-safe)
+  ✅ Lógica de dominio encapsulada (ej: Dinero.sumar())
+  ✅ Código más expresivo (Dinero vs BigDecimal)
+
+EJEMPLO REAL DEL PROYECTO:
+  • Dinero: Valida montos positivos, formatea a 2 decimales, suma/resta
+  • Email: Valida formato, normaliza a minúsculas, trim espacios
+  • DocumentoIdentidad: Valida longitud, tipo (DNI/Pasaporte)
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│ DECISIÓN 2: ENTIDADES CON LÓGICA DE NEGOCIO                    │
+└─────────────────────────────────────────────────────────────────┘
+
+❓ POR QUÉ las Entidades tienen métodos como depositar(), retirar()?
+
+ANTI-PATRÓN ANÉMICO (Lo que NO hicimos):
+  ```java
+  // ❌ Modelo anémico - solo getters/setters
+  class Cuenta {
+      private Dinero saldo;
+      
+      public void setSaldo(Dinero saldo) { this.saldo = saldo; }
+      public Dinero getSaldo() { return saldo; }
+  }
+  
+  // Lógica dispersa en servicios
+  class CuentaService {
+      void depositar(Cuenta cuenta, Dinero monto) {
+          cuenta.setSaldo(cuenta.getSaldo().sumar(monto));
+      }
+  }
+  ```
+
+MODELO RICO EN DOMINIO (Lo que SÍ hicimos):
+  ```java
+  // ✅ Lógica de negocio dentro de la entidad
+  class Cuenta {
+      private Dinero saldo;
+      private boolean activa;
+      
+      public void depositar(Dinero monto) {
+          validarCuentaActiva();
+          validarMontoPositivo(monto);
+          this.saldo = this.saldo.sumar(monto);
+      }
+      
+      public void retirar(Dinero monto) {
+          validarCuentaActiva();
+          validarSaldoSuficiente(monto);
+          this.saldo = this.saldo.restar(monto);
+      }
+  }
+  ```
+
+BENEFICIOS OBTENIDOS:
+  ✅ Lógica de negocio donde pertenece (en el dominio)
+  ✅ Validaciones centralizadas en la entidad
+  ✅ Imposible dejar la entidad en estado inválido
+  ✅ Reglas de negocio cerca de los datos
+  ✅ Fácil de testear (tests unitarios sin mocks)
+
+POR QUÉ ES MEJOR:
+  • La cuenta SABE cómo depositarse/retirarse
+  • No hay lógica de negocio en servicios
+  • Cambiar reglas = modificar UNA clase
+  • Tell, Don't Ask principle
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│ DECISIÓN 3: USE CASES EN LUGAR DE SERVICIOS GORDOS             │
+└─────────────────────────────────────────────────────────────────┘
+
+❓ POR QUÉ 8 Use Cases en lugar de 1 UsuarioService grande?
+
+ANTI-PATRÓN (Lo que NO hicimos):
+  ```java
+  // ❌ God Class - clase con demasiadas responsabilidades
+  class UsuarioService {
+      void crearUsuario() { ... }
+      void actualizarUsuario() { ... }
+      void eliminarUsuario() { ... }
+      void buscarUsuario() { ... }
+      void listarUsuarios() { ... }
+      void activarUsuario() { ... }
+      void desactivarUsuario() { ... }
+      void cambiarPassword() { ... }
+      // ... 20 métodos más
+  }
+  ```
+
+PATRÓN USE CASE (Lo que SÍ hicimos):
+  ```java
+  // ✅ Single Responsibility - una acción por clase
+  class CrearUsuarioUseCase {
+      public UsuarioDTO ejecutar(CrearUsuarioRequest request) {
+          validarEmailUnico(request.email);
+          validarDocumentoUnico(request.documento);
+          Usuario usuario = crearUsuario(request);
+          return guardarYMapear(usuario);
+      }
+  }
+  
+  class DepositarDineroUseCase { ... }
+  class TransferirDineroUseCase { ... }
+  ```
+
+BENEFICIOS OBTENIDOS:
+  ✅ Single Responsibility Principle aplicado
+  ✅ Fácil entender qué hace cada clase (nombre claro)
+  ✅ Fácil testear (una cosa a la vez)
+  ✅ Fácil modificar sin romper otras funcionalidades
+  ✅ Bajo acoplamiento entre casos de uso
+
+EJEMPLO REAL:
+  • CrearUsuarioUseCase: Solo crea usuarios
+  • DepositarDineroUseCase: Solo deposita
+  • TransferirDineroUseCase: Solo transfiere
+
+POR QUÉ 8 USE CASES:
+  • Cada acción del usuario = 1 Use Case
+  • Fácil rastrear qué código se ejecuta por acción
+  • Tests específicos por funcionalidad
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│ DECISIÓN 4: REPOSITORY PATTERN CON INTERFACES                  │
+└─────────────────────────────────────────────────────────────────┘
+
+❓ POR QUÉ interfaces IUsuarioRepository en Domain y 
+   implementación en Infrastructure?
+
+SIN ABSTRACCIÓN (Lo que NO hicimos):
+  ```java
+  // ❌ Acoplamiento directo a implementación
+  class CrearUsuarioUseCase {
+      private UsuarioRepositoryInMemory repository; // ¡Acoplado!
+      
+      void ejecutar() {
+          repository.guardar(usuario); // Imposible cambiar DB
+      }
+  }
+  ```
+
+CON ABSTRACCIÓN (Lo que SÍ hicimos):
+  ```java
+  // Domain Layer
+  interface IUsuarioRepository {
+      Usuario guardar(Usuario usuario);
+      Optional<Usuario> buscarPorId(String id);
+  }
+  
+  // Application Layer
+  class CrearUsuarioUseCase {
+      private final IUsuarioRepository repository; // ¡Interfaz!
+      
+      CrearUsuarioUseCase(IUsuarioRepository repository) {
+          this.repository = repository;
+      }
+  }
+  
+  // Infrastructure Layer
+  class UsuarioRepositoryInMemory implements IUsuarioRepository {
+      // Implementación concreta
+  }
+  ```
+
+BENEFICIOS OBTENIDOS:
+  ✅ Dependency Inversion Principle aplicado
+  ✅ Domain no depende de Infrastructure
+  ✅ Fácil cambiar de In-Memory a PostgreSQL
+  ✅ Fácil mockear en tests (Mockito)
+  ✅ Testeable sin base de datos real
+
+CAMBIO FUTURO FÁCIL:
+  ```java
+  // Agregar PostgreSQL sin modificar Use Cases
+  class UsuarioRepositoryPostgreSQL implements IUsuarioRepository {
+      // Nueva implementación
+  }
+  ```
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│ DECISIÓN 5: DTOs PARA TRANSFERENCIA DE DATOS                   │
+└─────────────────────────────────────────────────────────────────┘
+
+❓ POR QUÉ UsuarioDTO en lugar de devolver Usuario directamente?
+
+EXPONER ENTIDADES (Lo que NO hicimos):
+  ```java
+  // ❌ Expone entidad del dominio
+  Usuario usuario = useCase.ejecutar(request);
+  System.out.println(usuario.getPassword()); // ¡Problema de seguridad!
+  usuario.setActivo(false); // ¡Modificación externa!
+  ```
+
+USAR DTOs (Lo que SÍ hicimos):
+  ```java
+  // ✅ DTO sin información sensible
+  class UsuarioDTO {
+      private String id;
+      private String nombreCompleto;
+      private String email;
+      // Sin password, sin métodos de modificación
+  }
+  
+  UsuarioDTO dto = useCase.ejecutar(request);
+  // Imposible modificar el dominio desde fuera
+  ```
+
+BENEFICIOS OBTENIDOS:
+  ✅ Protege invariantes del dominio
+  ✅ No expone información sensible
+  ✅ Contrato estable con capa de presentación
+  ✅ Serialización JSON fácil (futuro REST API)
+  ✅ Versionado independiente de entidades
+
+MAPPERS PARA CONVERSIÓN:
+  ```java
+  class UsuarioMapper {
+      static UsuarioDTO toDTO(Usuario usuario) {
+          return new UsuarioDTO(
+              usuario.getId(),
+              usuario.getNombreCompleto(),
+              usuario.getEmail().getValor()
+          );
+      }
+  }
+  ```
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│ DECISIÓN 6: EXCEPCIONES CUSTOM DEL DOMINIO                     │
+└─────────────────────────────────────────────────────────────────┘
+
+❓ POR QUÉ CuentaNoEncontradaException en lugar de Exception genérica?
+
+EXCEPCIONES GENÉRICAS (Lo que NO hicimos):
+  ```java
+  // ❌ No es claro qué falló
+  try {
+      cuenta.retirar(monto);
+  } catch (Exception e) {
+      // ¿Qué error? ¿Saldo insuficiente? ¿Cuenta inactiva?
+      System.out.println("Error: " + e.getMessage());
+  }
+  ```
+
+EXCEPCIONES ESPECÍFICAS (Lo que SÍ hicimos):
+  ```java
+  // ✅ Manejo específico por tipo de error
+  try {
+      cuenta.retirar(monto);
+  } catch (SaldoInsuficienteException e) {
+      System.out.println("No tienes saldo suficiente");
+  } catch (CuentaInactivaException e) {
+      System.out.println("Tu cuenta está inactiva");
+  }
+  ```
+
+BENEFICIOS OBTENIDOS:
+  ✅ Manejo diferenciado de errores
+  ✅ Mensajes específicos al usuario
+  ✅ Código más expresivo
+  ✅ Fácil distinguir errores de negocio vs técnicos
+  ✅ Log más detallado
+
+EXCEPCIONES CREADAS:
+  • CuentaNoEncontradaException
+  • UsuarioNoEncontradoException
+  • SaldoInsuficienteException
+  • OperacionNoValidaException
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│ DECISIÓN 7: FACTORY PATTERN PARA REPOSITORIOS                  │
+└─────────────────────────────────────────────────────────────────┘
+
+❓ POR QUÉ RepositoryFactory con Singleton?
+
+SIN FACTORY (Lo que NO hicimos):
+  ```java
+  // ❌ Múltiples instancias, datos inconsistentes
+  IUsuarioRepository repo1 = new UsuarioRepositoryInMemory();
+  IUsuarioRepository repo2 = new UsuarioRepositoryInMemory();
+  // repo1 y repo2 tienen datos diferentes
+  ```
+
+CON FACTORY SINGLETON (Lo que SÍ hicimos):
+  ```java
+  // ✅ Una sola instancia compartida
+  class RepositoryFactory {
+      private static IUsuarioRepository usuarioRepo = null;
+      
+      public static IUsuarioRepository getUsuarioRepository() {
+          if (usuarioRepo == null) {
+              usuarioRepo = new UsuarioRepositoryInMemory();
+          }
+          return usuarioRepo;
+      }
+  }
+  ```
+
+BENEFICIOS OBTENIDOS:
+  ✅ Una sola fuente de verdad (datos consistentes)
+  ✅ Fácil cambiar implementación en un solo lugar
+  ✅ Control sobre creación de objetos
+  ✅ Facilita testing (método limpiarTodos())
+
+USO EN EL PROYECTO:
+  ```java
+  // Todos usan la misma instancia
+  IUsuarioRepository repo = RepositoryFactory.getUsuarioRepository();
+  ```
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│ DECISIÓN 8: CONCURRENTHASHMAP PARA THREAD-SAFETY               │
+└─────────────────────────────────────────────────────────────────┘
+
+❓ POR QUÉ ConcurrentHashMap en lugar de HashMap?
+
+PROBLEMA CON HASHMAP:
+  ```java
+  // ❌ No es thread-safe
+  private Map<String, Usuario> usuarios = new HashMap<>();
+  
+  // Thread 1: usuarios.put("1", usuario1);
+  // Thread 2: usuarios.put("2", usuario2);
+  // Resultado: Corrupción de datos
+  ```
+
+SOLUCIÓN CON CONCURRENTHASHMAP:
+  ```java
+  // ✅ Thread-safe sin locks manuales
+  private Map<String, Usuario> usuarios = new ConcurrentHashMap<>();
+  
+  // Múltiples threads pueden operar simultáneamente
+  ```
+
+BENEFICIOS OBTENIDOS:
+  ✅ Thread-safe por diseño
+  ✅ Sin locks manuales (synchronized)
+  ✅ Alto rendimiento concurrente
+  ✅ Previene race conditions
+  ✅ Preparado para aplicación multi-usuario
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│ DECISIÓN 9: SEPARACIÓN EN 4 CAPAS (CLEAN ARCHITECTURE)         │
+└─────────────────────────────────────────────────────────────────┘
+
+❓ POR QUÉ 4 capas en lugar de estructura tradicional MVC?
+
+ESTRUCTURA TRADICIONAL (Lo que NO hicimos):
+  ```
+  src/
+    models/          // Todo mezclado
+    controllers/     // Lógica de negocio aquí
+    views/           // UI
+  ```
+
+CLEAN ARCHITECTURE (Lo que SÍ hicimos):
+  ```
+  src/
+    domain/          // Core del negocio (independiente)
+    application/     // Casos de uso
+    infrastructure/  // Detalles técnicos
+    presentation/    // UI
+  ```
+
+BENEFICIOS OBTENIDOS:
+  ✅ Domain independiente (cambiable sin afectar core)
+  ✅ Testeable en cada capa
+  ✅ UI intercambiable (consola → web → móvil)
+  ✅ Infraestructura intercambiable (in-memory → DB)
+  ✅ Regla de dependencia respetada
+
+REGLA DE DEPENDENCIA:
+  Domain ← Application ← Infrastructure
+                     ← Presentation
+  
+  • Domain no depende de nadie
+  • Todos dependen de Domain
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│ DECISIÓN 10: INMUTABILIDAD EN VALUE OBJECTS                    │
+└─────────────────────────────────────────────────────────────────┘
+
+❓ POR QUÉ Value Objects son inmutables (final, sin setters)?
+
+MUTABILIDAD (Lo que NO hicimos):
+  ```java
+  // ❌ Mutable - propenso a bugs
+  class Dinero {
+      private BigDecimal cantidad;
+      
+      public void setCantidad(BigDecimal cantidad) {
+          this.cantidad = cantidad; // ¡Modificable!
+      }
+  }
+  
+  Dinero dinero = Dinero.de(100);
+  dinero.setCantidad(BigDecimal.valueOf(-50)); // ¡Inválido!
+  ```
+
+INMUTABILIDAD (Lo que SÍ hicimos):
+  ```java
+  // ✅ Inmutable - seguro
+  class Dinero {
+      private final BigDecimal cantidad; // final
+      
+      public Dinero(BigDecimal cantidad) { // Solo constructor
+          this.cantidad = cantidad;
+      }
+      
+      public Dinero sumar(Dinero otro) {
+          return new Dinero(this.cantidad.add(otro.cantidad));
+      }
+  }
+  ```
+
+BENEFICIOS OBTENIDOS:
+  ✅ Thread-safe (no hay race conditions)
+  ✅ No hay side effects
+  ✅ Fácil razonar sobre el código
+  ✅ Puede usarse como key en HashMap
+  ✅ No necesita clonar/copiar
+
+
+═══════════════════════════════════════════════════════════════════
+ RESUMEN DE DECISIONES
+═══════════════════════════════════════════════════════════════════
+
+┌────────────────────────┬──────────────────────────────────────┐
+│ DECISIÓN               │ BENEFICIO PRINCIPAL                  │
+├────────────────────────┼──────────────────────────────────────┤
+│ Value Objects          │ Validación centralizada              │
+│ Entidades ricas        │ Lógica en el dominio                 │
+│ Use Cases              │ Single Responsibility                │
+│ Interfaces Repository  │ Dependency Inversion                 │
+│ DTOs                   │ Protección del dominio               │
+│ Excepciones custom     │ Manejo específico de errores         │
+│ Factory Singleton      │ Consistencia de datos                │
+│ ConcurrentHashMap      │ Thread-safety                        │
+│ 4 capas                │ Independencia del dominio            │
+│ Inmutabilidad          │ Seguridad y thread-safety            │
+└────────────────────────┴──────────────────────────────────────┘
+
+TODAS LAS DECISIONES SE ALINEAN CON:
+  • Clean Architecture
+  • SOLID Principles
+  • Domain-Driven Design
+  • Best Practices de la industria
+
+
+═══════════════════════════════════════════════════════════════════
  LECCIONES APRENDIDAS
 ═══════════════════════════════════════════════════════════════════
 
